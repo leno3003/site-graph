@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 import urllib
+import os 
 import requests
 from pyvis.network import Network
 import networkx as nx
@@ -9,12 +10,6 @@ import scipy
 import numpy as np
 
 from collections import deque
-
-INTERNAL_COLOR = '#0072BB'
-EXTERNAL_COLOR = '#FF9F40'
-ERROR_COLOR = '#FF0800'
-RESOURCE_COLOR = '#2ECC71'
-
 
 def handle_error(error, error_obj, r, url, visited, error_codes):
     error = str(error_obj) if error else r.status_code
@@ -127,57 +122,6 @@ def get_node_info(nodes, error_codes, resource_pages, args):
     return node_info
 
 
-def visualize(edges, error_codes, resource_pages, args):
-    G = nx.DiGraph()
-    G.add_edges_from(edges)
-
-    if args.save_txt is not None or args.save_npz is not None:
-        nodes = list(G.nodes())
-        adj_matrix = nx.to_numpy_matrix(G, nodelist=nodes, dtype=int)
-
-        if args.save_npz is not None:
-            base_fname = args.save_npz.replace('.npz', '')
-            scipy.sparse.save_npz(args.save_npz, scipy.sparse.coo_matrix(adj_matrix))
-        else:
-            base_fname = args.save_txt.replace('.txt', '')
-            np.savetxt(args.save_txt, adj_matrix, fmt='%d')
-
-        node_info = get_node_info(nodes, error_codes, resource_pages, args)
-        with open(base_fname + '_nodes.txt', 'w') as f:
-            f.write('\n'.join([nodes[i] + '\t' + node_info[i] for i in range(len(nodes))]))
-
-    net = Network(width=args.width, height=args.height, directed=True)
-    net.from_nx(G)
-
-    if args.show_buttons:
-        net.show_buttons()
-    elif args.options is not None:
-        try:
-            with open(args.options, 'r') as f:
-                net.set_options(f.read())
-        except FileNotFoundError as e:
-            print('Error: options file', args.options, 'not found.')
-        except Exception as e:
-            print('Error applying options:', e)
-
-    for node in net.nodes:
-        node['size'] = 15
-        node['label'] = ''
-        if node['id'].startswith(args.site_url):
-            node['color'] = INTERNAL_COLOR
-            if node['id'] in resource_pages:
-                node['color'] = RESOURCE_COLOR
-        else:
-            node['color'] = EXTERNAL_COLOR
-
-        if node['id'] in error_codes:
-            node['title'] = f'{error_codes[node["id"]]} Error: <a href="{node["id"]}">{node["id"]}</a>'
-            node['color'] = ERROR_COLOR
-        else:
-            node['title'] = f'<a href="{node["id"]}">{node["id"]}</a>'
-
-    net.save_graph(args.vis_file)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Visualize the link graph of a website.')
@@ -200,6 +144,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    print("l'url è: " + args.site_url)
+    new_dir = "scanned_sites/" +  args.site_url.split("/")[2]
+    try:
+        os.makedirs(new_dir)
+    except:
+        pass
+
+
     if args.from_data_file is None:
         if not args.site_url.endswith('/'):
             if not args.force:
@@ -214,13 +166,13 @@ if __name__ == '__main__':
         edges, error_codes, resource_pages = crawl(args.site_url, args.visit_external)
         print('Crawl complete.')
 
-        with open(args.data_file, 'wb') as f:
-            pickle.dump((edges, error_codes, resource_pages, args.site_url), f)
-            print(f'Saved crawl data to {args.data_file}')
+        with open(str(new_dir + '/pages.txt'), 'w') as f:
+            for i in edges:
+                if 'Javascript:' not in i[1]:
+                    f.write(str(i[1]) + '\n')
+        print(f'Saved crawl data to {args.data_file}')
     else:
         with open(args.from_data_file, 'rb') as f:
             edges, error_codes, resource_pages, site_url = pickle.load(f)
             args.site_url = site_url
 
-    visualize(edges, error_codes, resource_pages, args)
-    print('Saved graph to', args.vis_file)
